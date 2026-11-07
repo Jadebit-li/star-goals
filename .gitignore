@@ -1,0 +1,8 @@
+# personal files (never upload these)
+config.py
+data.json
+
+# Python and Mac junk
+__pycache__/
+*.pyc
+.DS_Store
