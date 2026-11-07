@@ -4,6 +4,8 @@ A real-time glowing night sky that grows as you finish your own goals.
 
 The sky matches the real sky for your location and time. You start with an empty sky. Every goal you tick earns stars, and new stars appear on the map, brightest first. Earn enough and real constellations light up.
 
+![star-goals screenshot](screenshots/sky.png)
+
 ## Features
 
 - Real stars from the HYG star catalog, placed for your time and location
