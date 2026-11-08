@@ -1,4 +1,3 @@
-cat > README.md << 'EOF'
 # star-goals
 
 A real-time glowing night sky that grows as you finish your own goals.
