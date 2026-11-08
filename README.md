@@ -72,4 +72,3 @@ A small timer card sits in the top right corner.
 Star data comes from the HYG Database by David Nash (astronexus.com). Please check its page for its license terms.
 
 Built by Jadebit.
-EOF
