@@ -69,6 +69,17 @@ def untick(data, index):
     save(data)
     return goal["stars"]
 
+def edit_goal(data, index, name, stars, kind):
+    goal = data["goals"][index]
+    if not can_tick(goal):
+        # already ticked, so fix the stars it gave
+        diff = stars - goal["stars"]
+        goal["earned"] = max(0, goal.get("earned", 0) + diff)
+        data["total_stars"] = max(0, data["total_stars"] + diff)
+    goal["name"] = name
+    goal["stars"] = stars
+    goal["kind"] = kind
+    save(data)
 
 # ---------- small test menu (only runs when you run this file directly) ----------
 if __name__ == "__main__":

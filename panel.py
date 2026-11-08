@@ -16,7 +16,7 @@ class Panel:
     def __init__(self):
         self.data = goals.load()
         self.open = False
-        self.mode = "list"  # "list" or "add"
+        self.mode = "list"  # "list" or "add" (the form is used for add and edit)
         self.big = pygame.font.Font(None, 40)
         self.font = pygame.font.Font(None, 30)
         self.small = pygame.font.Font(None, 22)
@@ -24,13 +24,16 @@ class Panel:
         self.msg_time = 0
         self.x = 30
         self.y = 100
-        self.w = 480
+        self.w = 580
         self.row_h = 46
-        self.rects = []
-        self.del_rects = []
+        self.scroll = 0.0
+        self.rects = []       # (goal number, rect) for the rows on screen
+        self.del_rects = []   # (goal number, rect) for the x buttons
+        self.edit_rects = []  # (goal number, rect) for the edit buttons
         self.add_rect = None
-        self.confirm = None  # goal waiting for a second click to delete
-        # add-goal form
+        self.confirm = None   # goal waiting for a second click to delete
+        # goal form
+        self.edit_index = None  # None = adding a new goal, a number = editing that goal
         self.name = ""
         self.stars_text = "1"
         self.kind = "daily"
@@ -51,18 +54,26 @@ class Panel:
             if event.key == pygame.K_g:
                 self.open = not self.open
                 self.mode = "list"
+                self.edit_index = None
                 self.confirm = None
                 if self.open:
                     self.data = goals.load()
+        elif event.type == pygame.MOUSEWHEEL:
+            if self.open and self.mode == "list":
+                self.scroll -= event.y * 0.35
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and self.open:
             if self.mode == "add":
                 self.click_form(event.pos)
             else:
                 self.click_list(event.pos)
 
+    def close_form(self):
+        self.mode = "list"
+        self.edit_index = None
+
     def key_in_form(self, event):
         if event.key == pygame.K_ESCAPE:
-            self.mode = "list"
+            self.close_form()
         elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             self.save_form()
         elif event.key == pygame.K_TAB:
@@ -83,8 +94,13 @@ class Panel:
         name = self.name.strip()
         if not name or not self.stars_text:
             return
-        goals.add_goal(self.data, name, max(1, int(self.stars_text)), self.kind)
-        self.mode = "list"
+        stars = max(1, int(self.stars_text))
+        if self.edit_index is not None:
+            goals.edit_goal(self.data, self.edit_index, name, stars, self.kind)
+        else:
+            goals.add_goal(self.data, name, stars, self.kind)
+            self.scroll = 10 ** 6  # jump to the bottom so you see the new goal
+        self.close_form()
 
     def click_form(self, pos):
         r = self.form_rects
@@ -97,18 +113,19 @@ class Panel:
         elif r["save"].collidepoint(pos):
             self.save_form()
         elif r["cancel"].collidepoint(pos):
-            self.mode = "list"
+            self.close_form()
 
     def click_list(self, pos):
         if self.add_rect and self.add_rect.collidepoint(pos):
             self.mode = "add"
+            self.edit_index = None
             self.name = ""
             self.stars_text = "1"
             self.kind = "daily"
             self.field = 0
             self.confirm = None
             return
-        for i, rect in enumerate(self.del_rects):
+        for i, rect in self.del_rects:
             if rect.collidepoint(pos):
                 if self.confirm == i:
                     goals.delete_goal(self.data, i)
@@ -116,8 +133,19 @@ class Panel:
                 else:
                     self.confirm = i  # first click asks "sure?"
                 return
+        for i, rect in self.edit_rects:
+            if rect.collidepoint(pos):
+                g = self.data["goals"][i]
+                self.mode = "add"
+                self.edit_index = i
+                self.name = g["name"]
+                self.stars_text = str(g["stars"])
+                self.kind = g["kind"]
+                self.field = 0
+                self.confirm = None
+                return
         self.confirm = None
-        for i, rect in enumerate(self.rects):
+        for i, rect in self.rects:
             if rect.collidepoint(pos):
                 goal = self.data["goals"][i]
                 if goals.can_tick(goal):
@@ -166,28 +194,47 @@ class Panel:
 
     def draw_list(self, screen):
         goal_list = self.data["goals"]
-        rows = max(1, len(goal_list))
-        height = 66 + rows * self.row_h + 60
+        top = 60
+
+        # how many rows fit on this screen
+        space = screen.get_height() - self.y - top - 60 - 30
+        max_rows = max(3, space // self.row_h)
+        rows_shown = min(len(goal_list), max_rows)
+        max_scroll = max(0, len(goal_list) - max_rows)
+        self.scroll = max(0.0, min(self.scroll, float(max_scroll)))
+        first = int(self.scroll)
+
+        rows = max(1, rows_shown)
+        height = top + rows * self.row_h + 60
         self.draw_box(screen, height)
         screen.blit(self.font.render("My goals", True, SAGE), (self.x + 22, self.y + 18))
+        if max_scroll > 0:
+            more = self.small.render("scroll for more", True, DIM)
+            screen.blit(more, (self.x + self.w - more.get_width() - 24, self.y + 24))
 
         self.rects = []
         self.del_rects = []
+        self.edit_rects = []
         mouse = pygame.mouse.get_pos()
 
         if not goal_list:
             empty = self.small.render("No goals yet. Click + Add goal below", True, DIM)
             screen.blit(empty, (self.x + 22, self.y + 76))
 
-        for i, g in enumerate(goal_list):
-            rect = pygame.Rect(self.x + 12, self.y + 60 + i * self.row_h,
+        for slot in range(rows_shown):
+            i = first + slot
+            g = goal_list[i]
+            rect = pygame.Rect(self.x + 12, self.y + top + slot * self.row_h,
                                self.w - 24, self.row_h - 6)
-            del_rect = pygame.Rect(rect.right - 60, rect.y, 60, rect.height)
-            self.rects.append(rect)
-            self.del_rects.append(del_rect)
+            del_rect = pygame.Rect(rect.right - 50, rect.y, 50, rect.height)
+            edit_rect = pygame.Rect(del_rect.x - 56, rect.y, 56, rect.height)
+            self.rects.append((i, rect))
+            self.del_rects.append((i, del_rect))
+            self.edit_rects.append((i, edit_rect))
             done = not goals.can_tick(g)
 
-            if rect.collidepoint(mouse) and not del_rect.collidepoint(mouse) and not done:
+            on_buttons = del_rect.collidepoint(mouse) or edit_rect.collidepoint(mouse)
+            if rect.collidepoint(mouse) and not on_buttons and not done:
                 hover = pygame.Surface(rect.size, pygame.SRCALPHA)
                 pygame.draw.rect(hover, (255, 255, 255, 18), hover.get_rect(), border_radius=10)
                 screen.blit(hover, rect.topleft)
@@ -201,18 +248,38 @@ class Panel:
             name = self.font.render(g["name"], True, DIM if done else CREAM)
             screen.blit(name, (rect.x + 40, rect.centery - name.get_height() // 2))
 
-            stars = self.small.render(str(g["stars"]) + " stars", True, DIM if done else PINK)
-            screen.blit(stars, (del_rect.x - stars.get_width() - 6,
+            # "daily" or "once" label, then the stars, going left from the edit button
+            kind_text = self.small.render("daily" if g["kind"] == "daily" else "once", True, DIM)
+            kind_x = edit_rect.x - kind_text.get_width() - 6
+            screen.blit(kind_text, (kind_x, rect.centery - kind_text.get_height() // 2))
+            word = "star" if g["stars"] == 1 else "stars"
+            stars = self.small.render(str(g["stars"]) + " " + word, True, DIM if done else PINK)
+            screen.blit(stars, (kind_x - stars.get_width() - 14,
                                 rect.centery - stars.get_height() // 2))
 
+            # edit button
+            edit_color = SAGE if edit_rect.collidepoint(mouse) else DIM
+            edit_label = self.small.render("edit", True, edit_color)
+            screen.blit(edit_label, edit_label.get_rect(center=edit_rect.center))
+
+            # delete button
             if self.confirm == i:
                 label = self.small.render("sure?", True, RED)
             else:
                 label = self.small.render("x", True, DIM)
             screen.blit(label, label.get_rect(center=del_rect.center))
 
+        # thin scroll bar
+        if max_scroll > 0:
+            track_y = self.y + top
+            track_h = rows * self.row_h - 6
+            thumb_h = max(24, int(track_h * max_rows / len(goal_list)))
+            thumb_y = track_y + int((track_h - thumb_h) * (self.scroll / max_scroll))
+            pygame.draw.rect(screen, (60, 68, 100),
+                             (self.x + self.w - 8, thumb_y, 3, thumb_h), border_radius=2)
+
         # add button
-        self.add_rect = pygame.Rect(self.x + 12, self.y + 60 + rows * self.row_h + 4,
+        self.add_rect = pygame.Rect(self.x + 12, self.y + top + rows * self.row_h + 4,
                                     self.w - 24, 40)
         if self.add_rect.collidepoint(mouse):
             hover = pygame.Surface(self.add_rect.size, pygame.SRCALPHA)
@@ -224,7 +291,8 @@ class Panel:
 
     def draw_form(self, screen):
         self.draw_box(screen, 362)
-        screen.blit(self.font.render("New goal", True, SAGE), (self.x + 22, self.y + 18))
+        title = "Edit goal" if self.edit_index is not None else "New goal"
+        screen.blit(self.font.render(title, True, SAGE), (self.x + 22, self.y + 18))
 
         screen.blit(self.small.render("Name", True, DIM), (self.x + 24, self.y + 60))
         name_rect = pygame.Rect(self.x + 22, self.y + 82, self.w - 44, 42)
@@ -244,8 +312,8 @@ class Panel:
         label = self.small.render(text, True, CREAM)
         screen.blit(label, (kind_rect.x + 14, kind_rect.centery - label.get_height() // 2))
 
-        save_rect = pygame.Rect(self.x + 22, self.y + 284, 200, 46)
-        cancel_rect = pygame.Rect(self.x + self.w - 22 - 200, self.y + 284, 200, 46)
+        save_rect = pygame.Rect(self.x + 22, self.y + 284, 210, 46)
+        cancel_rect = pygame.Rect(self.x + self.w - 22 - 210, self.y + 284, 210, 46)
         pygame.draw.rect(screen, (55, 85, 70), save_rect, border_radius=12)
         pygame.draw.rect(screen, SAGE, save_rect, width=1, border_radius=12)
         pygame.draw.rect(screen, FIELD_BG, cancel_rect, border_radius=12)
