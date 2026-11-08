@@ -7,3 +7,5 @@ __pycache__/
 *.pyc
 .DS_Storepomodoro_data.json
 pomodoro_data.json
+
+.DS_Store

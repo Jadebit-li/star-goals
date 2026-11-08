@@ -38,11 +38,11 @@ You need Python 3.
 ## Controls
 
 - **G**: open or close the goals panel
-- **Click a goal**: tick it and earn stars. A daily goal can be ticked many times a day, and a counter like x3 shows how many times
-- **Right-click a goal**, or click the small minus: undo one tick
+- **Click a goal**: tick it and earn stars
+- **Daily goals**: the Add button turns into a stepper like - 3 +. Press + to tick again today, and - to take one back
 - **One-time goals**: click once to finish, click again to undo
-- **Up and down arrows**: move a goal in the list
-- **sort**: unfinished goals first, daily before one-time, finished goals last
+- **Right-click a goal**: undo one tick
+- **Hold and drag the dots on the left**: move a goal up or down
 - **edit**: change a goal's name, stars, or repeat setting
 - **x on a goal**: click twice to delete it (you lose the stars it gave)
 - **+ Add goal**: make your own goal (Tab moves between boxes, Enter saves, Esc cancels)
