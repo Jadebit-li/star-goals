@@ -6,6 +6,7 @@ import time
 import pygame
 import panel
 import shooting
+from pomodoro import Pomodoro
 
 pygame.init()
 WIDTH, HEIGHT = pygame.display.get_desktop_sizes()[0]
@@ -93,9 +94,6 @@ CONSTELLATIONS = {
         (95947, 100453), (100453, 102098), (97165, 100453), (100453, 102488),
     ],
     "Crux": [
-        (60718, 61084), (62434, 59747),
-    ],
-        "Crux": [
         (60718, 61084), (62434, 59747),
     ],
     "Lyra": [
@@ -250,6 +248,7 @@ screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
 pygame.display.set_caption("Jadebit Sky")
 clock = pygame.time.Clock()
 ui = panel.Panel()
+pomo = Pomodoro()  # pomodoro timer (no audio). Minimizes to a little clock, bottom right
 shooters = shooting.ShootingStars(WIDTH, HEIGHT)
 
 # background gradient (made once)
@@ -408,7 +407,10 @@ while running:
                 pygame.display.toggle_fullscreen()
             if event.key == pygame.K_c:
                 show_lines = not show_lines
+            if event.key == pygame.K_t:
+                pomo.toggle_minimized()  # T = minimize / open the pomodoro
         ui.handle_event(event)
+        pomo.handle_event(event)
 
     frame += 1
     check_unlocks()
@@ -472,6 +474,7 @@ while running:
                 pygame.draw.circle(screen, color, (int(x), int(y)), int(8 + 45 * p), 1)
 
     ui.draw(screen)
+    pomo.draw(screen)
     pygame.display.flip()
     clock.tick(30)
 

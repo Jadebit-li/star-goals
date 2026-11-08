@@ -1,0 +1,10 @@
+{
+ "settings": {
+  "focus": 25,
+  "short": 5,
+  "long": 15,
+  "every": 4
+ },
+ "log": [],
+ "minimized": true
+}
