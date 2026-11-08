@@ -13,7 +13,7 @@ The sky matches the real sky for your location and time. You start with an empty
 - A Milky Way band that fades in as you earn stars
 - Your own goals, daily or one-time, with the number of stars you choose
 - Daily goals can be ticked as many times as you want in a day, with a counter
-- Edit, delete, reorder and sort your goals, and scroll long lists
+- Edit, delete and drag your goals to reorder them, new goals are added at the top, and long lists scroll
 - 8 real constellations unlock as your star count grows
 - New stars pulse with pink rings, and shooting stars start after 500 stars
 - A small Pomodoro timer with a session log, which shrinks into a glowing moon
