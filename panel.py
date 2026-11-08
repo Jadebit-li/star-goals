@@ -6,15 +6,20 @@ CREAM = (255, 244, 225)
 SAGE = (150, 185, 165)
 PINK = (225, 170, 190)
 DIM = (125, 135, 160)
+FAINT = (60, 68, 100)
 RED = (225, 130, 140)
 PANEL_BG = (14, 17, 32, 215)
 PANEL_BORDER = (70, 80, 115, 160)
 FIELD_BG = (24, 28, 50)
 
+SORT_DELAY = 1.0   # seconds after a tick before finished goals sink to the bottom
+DRAG_START = 6     # pixels you must move while holding before a drag begins
+
 
 class Panel:
     def __init__(self):
         self.data = goals.load()
+        goals.auto_sort(self.data)
         self.open = False
         self.mode = "list"  # "list" or "add" (the form is used for add and edit)
         self.big = pygame.font.Font(None, 40)
@@ -24,14 +29,18 @@ class Panel:
         self.msg_time = 0
         self.x = 30
         self.y = 100
-        self.w = 580
+        self.w = 720
         self.row_h = 46
         self.scroll = 0.0
-        self.rects = []       # (goal number, rect) for the rows on screen
-        self.del_rects = []   # (goal number, rect) for the x buttons
-        self.edit_rects = []  # (goal number, rect) for the edit buttons
+        self.max_rows = 8
+        self.hits = []        # (what, goal number, rect) for everything clickable in the list
         self.add_rect = None
         self.confirm = None   # goal waiting for a second click to delete
+        # drag and drop
+        self.press = None     # {"i": row index, "pos": where the mouse went down}
+        self.dragging = False
+        # auto-sort (finished goals sink to the bottom shortly after you tick them)
+        self.sort_due = 0.0
         # goal form
         self.edit_index = None  # None = adding a new goal, a number = editing that goal
         self.name = ""
@@ -56,16 +65,22 @@ class Panel:
                 self.mode = "list"
                 self.edit_index = None
                 self.confirm = None
+                self.press = None
+                self.dragging = False
                 if self.open:
                     self.data = goals.load()
+                    goals.auto_sort(self.data)
         elif event.type == pygame.MOUSEWHEEL:
             if self.open and self.mode == "list":
                 self.scroll -= event.y * 0.35
-        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and self.open:
+        elif event.type == pygame.MOUSEBUTTONDOWN and self.open:
             if self.mode == "add":
-                self.click_form(event.pos)
-            else:
+                if event.button == 1:
+                    self.click_form(event.pos)
+            elif event.button == 1:
                 self.click_list(event.pos)
+            elif event.button == 3:
+                self.right_click(event.pos)
 
     def close_form(self):
         self.mode = "list"
@@ -97,9 +112,13 @@ class Panel:
         stars = max(1, int(self.stars_text))
         if self.edit_index is not None:
             goals.edit_goal(self.data, self.edit_index, name, stars, self.kind)
+            self.sort_due = time.time() + SORT_DELAY
         else:
             goals.add_goal(self.data, name, stars, self.kind)
-            self.scroll = 10 ** 6  # jump to the bottom so you see the new goal
+            goals.auto_sort(self.data)
+            # jump to the new goal (it is the last unfinished one)
+            last_open = max(i for i, g in enumerate(self.data["goals"]) if not goals.is_done(g))
+            self.scroll = float(last_open - self.max_rows + 1)
         self.close_form()
 
     def click_form(self, pos):
@@ -115,6 +134,10 @@ class Panel:
         elif r["cancel"].collidepoint(pos):
             self.close_form()
 
+    def say(self, text):
+        self.msg = text
+        self.msg_time = time.time()
+
     def click_list(self, pos):
         if self.add_rect and self.add_rect.collidepoint(pos):
             self.mode = "add"
@@ -125,16 +148,20 @@ class Panel:
             self.field = 0
             self.confirm = None
             return
-        for i, rect in self.del_rects:
-            if rect.collidepoint(pos):
+
+        # buttons first
+        for what, i, rect in self.hits:
+            if what == "row" or not rect.collidepoint(pos):
+                continue
+            if what == "del":
                 if self.confirm == i:
                     goals.delete_goal(self.data, i)
                     self.confirm = None
                 else:
                     self.confirm = i  # first click asks "sure?"
                 return
-        for i, rect in self.edit_rects:
-            if rect.collidepoint(pos):
+            self.confirm = None
+            if what == "edit":
                 g = self.data["goals"][i]
                 self.mode = "add"
                 self.edit_index = i
@@ -142,19 +169,86 @@ class Panel:
                 self.stars_text = str(g["stars"])
                 self.kind = g["kind"]
                 self.field = 0
-                self.confirm = None
-                return
+            elif what == "plus":
+                earned = goals.tick(self.data, i)
+                if earned:
+                    self.say("+" + str(earned) + " stars")
+                self.sort_due = time.time() + SORT_DELAY
+            elif what == "minus":
+                removed = goals.untick(self.data, i)
+                if removed:
+                    self.say("-" + str(removed) + " stars")
+                self.sort_due = time.time() + SORT_DELAY
+            return
+
+        # then the row itself: remember the press. If the mouse moves it becomes a
+        # drag, if it is let go in place it counts as a click (see update_drag)
         self.confirm = None
-        for i, rect in self.rects:
-            if rect.collidepoint(pos):
-                goal = self.data["goals"][i]
-                if goals.can_tick(goal):
-                    earned = goals.tick(self.data, i)
-                    self.msg = "+" + str(earned) + " stars"
-                else:
-                    removed = goals.untick(self.data, i)
-                    self.msg = "-" + str(removed) + " stars"
-                self.msg_time = time.time()
+        for what, i, rect in self.hits:
+            if what == "row" and rect.collidepoint(pos):
+                self.press = {"i": i, "pos": pos}
+                self.dragging = False
+                return
+
+    def row_clicked(self, i):
+        goal = self.data["goals"][i]
+        if goal["kind"] == "once":
+            if goals.can_tick(goal):
+                earned = goals.tick(self.data, i)
+                self.say("+" + str(earned) + " stars")
+            else:
+                removed = goals.untick(self.data, i)
+                self.say("-" + str(removed) + " stars")
+        elif goals.today_count(goal) == 0:
+            earned = goals.tick(self.data, i)  # first tick = "add to cart"
+            self.say("+" + str(earned) + " stars")
+        # daily goal that is already ticked: use the - / + buttons
+        self.sort_due = time.time() + SORT_DELAY
+
+    def right_click(self, pos):
+        # right-click a row to undo one tick
+        for what, i, rect in self.hits:
+            if what == "row" and rect.collidepoint(pos):
+                removed = goals.untick(self.data, i)
+                if removed:
+                    self.say("-" + str(removed) + " stars")
+                self.sort_due = time.time() + SORT_DELAY
+                return
+
+    def update_drag(self, first, rows_shown, list_top):
+        """Called every frame from draw_list. Handles hold-and-drag reordering."""
+        if self.press is None:
+            return
+        mx, my = pygame.mouse.get_pos()
+        if not pygame.mouse.get_pressed()[0]:
+            # mouse released
+            if self.dragging:
+                goals.save(self.data)
+                self.sort_due = time.time() + SORT_DELAY
+            else:
+                self.row_clicked(self.press["i"])
+            self.press = None
+            self.dragging = False
+            return
+
+        if not self.dragging and abs(my - self.press["pos"][1]) > DRAG_START:
+            self.dragging = True
+            self.confirm = None
+        if not self.dragging:
+            return
+
+        # the row under the mouse is where the dragged goal should go
+        slot = int((my - list_top) // self.row_h)
+        target = max(first, min(first + rows_shown - 1, first + slot))
+        if target != self.press["i"]:
+            goals.move_to(self.data, self.press["i"], target)
+            self.press["i"] = target
+
+        # scroll while dragging near the top or bottom edge
+        if my < list_top + 8:
+            self.scroll -= 0.12
+        elif my > list_top + rows_shown * self.row_h - 8:
+            self.scroll += 0.12
 
     # ---------- drawing ----------
     def draw_box(self, screen, height):
@@ -192,30 +286,47 @@ class Panel:
         else:
             self.draw_list(screen)
 
+    def draw_grip(self, screen, x, cy, color):
+        for dx in (0, 6):
+            for dy in (-8, 0, 8):
+                pygame.draw.circle(screen, color, (x + dx, cy + dy), 2)
+
     def draw_list(self, screen):
+        # finished goals sink to the bottom a moment after you tick them
+        if self.sort_due and time.time() >= self.sort_due and self.press is None:
+            self.sort_due = 0.0
+            if goals.auto_sort(self.data):
+                self.confirm = None
+
         goal_list = self.data["goals"]
         top = 60
+        bottom = 90
 
         # how many rows fit on this screen
-        space = screen.get_height() - self.y - top - 60 - 30
+        space = screen.get_height() - self.y - top - bottom - 20
         max_rows = max(3, space // self.row_h)
+        self.max_rows = max_rows
         rows_shown = min(len(goal_list), max_rows)
         max_scroll = max(0, len(goal_list) - max_rows)
         self.scroll = max(0.0, min(self.scroll, float(max_scroll)))
         first = int(self.scroll)
 
+        self.update_drag(first, rows_shown, self.y + top)
+        self.scroll = max(0.0, min(self.scroll, float(max_scroll)))
+        first = int(self.scroll)
+        goal_list = self.data["goals"]
+
         rows = max(1, rows_shown)
-        height = top + rows * self.row_h + 60
+        height = top + rows * self.row_h + bottom
         self.draw_box(screen, height)
+        mouse = pygame.mouse.get_pos()
         screen.blit(self.font.render("My goals", True, SAGE), (self.x + 22, self.y + 18))
+
         if max_scroll > 0:
             more = self.small.render("scroll for more", True, DIM)
             screen.blit(more, (self.x + self.w - more.get_width() - 24, self.y + 24))
 
-        self.rects = []
-        self.del_rects = []
-        self.edit_rects = []
-        mouse = pygame.mouse.get_pos()
+        self.hits = []
 
         if not goal_list:
             empty = self.small.render("No goals yet. Click + Add goal below", True, DIM)
@@ -224,45 +335,94 @@ class Panel:
         for slot in range(rows_shown):
             i = first + slot
             g = goal_list[i]
-            rect = pygame.Rect(self.x + 12, self.y + top + slot * self.row_h,
-                               self.w - 24, self.row_h - 6)
-            del_rect = pygame.Rect(rect.right - 50, rect.y, 50, rect.height)
-            edit_rect = pygame.Rect(del_rect.x - 56, rect.y, 56, rect.height)
-            self.rects.append((i, rect))
-            self.del_rects.append((i, del_rect))
-            self.edit_rects.append((i, edit_rect))
-            done = not goals.can_tick(g)
+            y = self.y + top + slot * self.row_h
+            rect = pygame.Rect(self.x + 12, y, self.w - 24, self.row_h - 6)
+            h = rect.height
 
-            on_buttons = del_rect.collidepoint(mouse) or edit_rect.collidepoint(mouse)
-            if rect.collidepoint(mouse) and not on_buttons and not done:
+            del_rect = pygame.Rect(rect.right - 44, y, 44, h)
+            edit_rect = pygame.Rect(del_rect.x - 54, y, 54, h)
+            stepper_rect = pygame.Rect(edit_rect.x - 8 - 104, y + (h - 32) // 2, 104, 32)
+            daily = g["kind"] == "daily"
+            count = goals.today_count(g)
+            done = count > 0
+            dragged = self.dragging and self.press is not None and self.press["i"] == i
+
+            self.hits.append(("row", i, rect))
+            self.hits.append(("del", i, del_rect))
+            self.hits.append(("edit", i, edit_rect))
+
+            # columns, going left from the stepper
+            kind_text = self.small.render("daily" if daily else "once", True, DIM)
+            kind_x = stepper_rect.x - 10 - kind_text.get_width()
+            word = "star" if g["stars"] == 1 else "stars"
+            stars_text = self.small.render(str(g["stars"]) + " " + word, True,
+                                           DIM if (done and not daily) else PINK)
+            stars_x = kind_x - 14 - stars_text.get_width()
+
+            on_buttons = (del_rect.collidepoint(mouse) or edit_rect.collidepoint(mouse)
+                          or (daily and stepper_rect.collidepoint(mouse)))
+            if dragged:
+                lift = pygame.Surface(rect.size, pygame.SRCALPHA)
+                pygame.draw.rect(lift, (255, 255, 255, 34), lift.get_rect(), border_radius=10)
+                screen.blit(lift, rect.topleft)
+                pygame.draw.rect(screen, SAGE, rect, width=1, border_radius=10)
+            elif rect.collidepoint(mouse) and not on_buttons and not self.dragging:
                 hover = pygame.Surface(rect.size, pygame.SRCALPHA)
                 pygame.draw.rect(hover, (255, 255, 255, 18), hover.get_rect(), border_radius=10)
                 screen.blit(hover, rect.topleft)
 
-            circle = (rect.x + 18, rect.centery)
+            # grip (hold and drag the row to move it)
+            self.draw_grip(screen, rect.x + 10, rect.centery,
+                           SAGE if dragged else FAINT)
+
+            # circle
+            circle = (rect.x + 38, rect.centery)
             if done:
                 pygame.draw.circle(screen, SAGE, circle, 9)
             else:
                 pygame.draw.circle(screen, CREAM, circle, 9, 2)
 
+            # name (clipped so it never runs into the other columns)
             name = self.font.render(g["name"], True, DIM if done else CREAM)
-            screen.blit(name, (rect.x + 40, rect.centery - name.get_height() // 2))
+            name_x = rect.x + 60
+            screen.set_clip(pygame.Rect(name_x, y, max(0, stars_x - 10 - name_x), h))
+            screen.blit(name, (name_x, rect.centery - name.get_height() // 2))
+            screen.set_clip(None)
 
-            # "daily" or "once" label, then the stars, going left from the edit button
-            kind_text = self.small.render("daily" if g["kind"] == "daily" else "once", True, DIM)
-            kind_x = edit_rect.x - kind_text.get_width() - 6
+            # stars and kind
+            screen.blit(stars_text, (stars_x, rect.centery - stars_text.get_height() // 2))
             screen.blit(kind_text, (kind_x, rect.centery - kind_text.get_height() // 2))
-            word = "star" if g["stars"] == 1 else "stars"
-            stars = self.small.render(str(g["stars"]) + " " + word, True, DIM if done else PINK)
-            screen.blit(stars, (kind_x - stars.get_width() - 14,
-                                rect.centery - stars.get_height() // 2))
 
-            # edit button
+            # stepper: "Add" first, then - count + (daily goals only)
+            if daily:
+                if count == 0:
+                    self.hits.append(("plus", i, stepper_rect))
+                    hot = stepper_rect.collidepoint(mouse)
+                    pygame.draw.rect(screen, SAGE if hot else DIM, stepper_rect,
+                                     width=1, border_radius=10)
+                    lab = self.small.render("Add", True, SAGE if hot else DIM)
+                    screen.blit(lab, lab.get_rect(center=stepper_rect.center))
+                else:
+                    minus_rect = pygame.Rect(stepper_rect.x, stepper_rect.y, 32, 32)
+                    plus_rect = pygame.Rect(stepper_rect.right - 32, stepper_rect.y, 32, 32)
+                    self.hits.append(("minus", i, minus_rect))
+                    self.hits.append(("plus", i, plus_rect))
+                    pygame.draw.rect(screen, FIELD_BG, stepper_rect, border_radius=10)
+                    pygame.draw.rect(screen, SAGE, stepper_rect, width=1, border_radius=10)
+                    num = self.font.render(str(count), True, CREAM)
+                    screen.blit(num, num.get_rect(center=stepper_rect.center))
+                    mc = SAGE if minus_rect.collidepoint(mouse) else DIM
+                    pc = SAGE if plus_rect.collidepoint(mouse) else DIM
+                    cx, cy = minus_rect.center
+                    pygame.draw.line(screen, mc, (cx - 6, cy), (cx + 6, cy), 2)
+                    cx, cy = plus_rect.center
+                    pygame.draw.line(screen, pc, (cx - 6, cy), (cx + 6, cy), 2)
+                    pygame.draw.line(screen, pc, (cx, cy - 6), (cx, cy + 6), 2)
+
+            # edit, delete
             edit_color = SAGE if edit_rect.collidepoint(mouse) else DIM
             edit_label = self.small.render("edit", True, edit_color)
             screen.blit(edit_label, edit_label.get_rect(center=edit_rect.center))
-
-            # delete button
             if self.confirm == i:
                 label = self.small.render("sure?", True, RED)
             else:
@@ -275,10 +435,10 @@ class Panel:
             track_h = rows * self.row_h - 6
             thumb_h = max(24, int(track_h * max_rows / len(goal_list)))
             thumb_y = track_y + int((track_h - thumb_h) * (self.scroll / max_scroll))
-            pygame.draw.rect(screen, (60, 68, 100),
+            pygame.draw.rect(screen, FAINT,
                              (self.x + self.w - 8, thumb_y, 3, thumb_h), border_radius=2)
 
-        # add button
+        # add button and a small hint
         self.add_rect = pygame.Rect(self.x + 12, self.y + top + rows * self.row_h + 4,
                                     self.w - 24, 40)
         if self.add_rect.collidepoint(mouse):
@@ -288,6 +448,9 @@ class Panel:
         pygame.draw.rect(screen, SAGE, self.add_rect, width=1, border_radius=10)
         label = self.font.render("+ Add goal", True, SAGE)
         screen.blit(label, label.get_rect(center=self.add_rect.center))
+        tip = self.small.render("click = tick    hold and drag = move    right-click = undo one",
+                                True, FAINT)
+        screen.blit(tip, (self.x + 24, self.add_rect.bottom + 10))
 
     def draw_form(self, screen):
         self.draw_box(screen, 362)
@@ -306,7 +469,7 @@ class Panel:
         pygame.draw.rect(screen, FIELD_BG, kind_rect, border_radius=10)
         pygame.draw.rect(screen, DIM, kind_rect, width=1, border_radius=10)
         if self.kind == "daily":
-            text = "Repeats every day  (click to change)"
+            text = "Repeats every day, tick it as many times as you want  (click to change)"
         else:
             text = "One time only  (click to change)"
         label = self.small.render(text, True, CREAM)
