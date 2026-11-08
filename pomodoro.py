@@ -11,16 +11,17 @@ DIM = (125, 135, 160)
 FAINT = (60, 68, 100)
 PANEL_BG = (14, 17, 32, 215)
 PANEL_BORDER = (70, 80, 115, 160)
-CLOCK_BODY = (18, 21, 40)        # the minimized clock is solid so its ears look clean
-CLOCK_EAR = (26, 30, 54)
-CLOCK_EDGE = (70, 80, 115)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(HERE, "pomodoro_data.json")   # your settings and your log live here
 
 CARD_POS = "top-right"     # where the full card sits: "top-right" or "bottom-right"
 MARGIN = 30                # distance from the screen edges
-CLOCK_R = 40               # size of the minimized clock
+CLOCK_R = 40               # size of the minimized moon
+
+MOON_LIGHT = (246, 238, 214)   # moon surface, bright side
+MOON_SHADE = (212, 205, 190)   # moon surface, dark edge
+MOON_TEXT = (30, 34, 62)       # time written on the moon
 
 DEFAULTS = {"focus": 25, "short": 5, "long": 15, "every": 4}
 LIMITS = {"focus": (1, 180), "short": (1, 60), "long": (1, 120), "every": (2, 10)}
@@ -89,6 +90,10 @@ class Pomodoro:
         self.log_scroll = 0
         self.rect = None
         self.buttons = {}
+        # the moon and its glow are drawn once and reused
+        self.moon = self.build_moon(CLOCK_R)
+        self.glow_cream = self.build_glow(CLOCK_R, (255, 240, 200))
+        self.glow_pink = self.build_glow(CLOCK_R, PINK)
 
     # ---------- saving ----------
     def save(self):
@@ -203,7 +208,7 @@ class Pomodoro:
                     self.press(name)
                     return
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
-            # right-click the little clock to start or pause without opening it
+            # right-click the little moon to start or pause without opening it
             if self.minimized and self.rect and self.rect.collidepoint(event.pos):
                 self.toggle_run()
         elif event.type == pygame.MOUSEWHEEL:
@@ -407,71 +412,99 @@ class Pomodoro:
         self.buttons["back"] = back
         self.draw_button(screen, back, "back", mouse)
 
-    # ---------- the minimized cat clock ----------
+    # ---------- the minimized moon clock ----------
+    def build_moon(self, R):
+        k = 4  # draw it big, then shrink it, so the edge is smooth
+        size = 2 * R * k
+        surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        c = size // 2
+        steps = 28
+        for s in range(steps):
+            t = s / (steps - 1)
+            radius = int(R * k * (1 - 0.82 * t))
+            shift = int(R * k * 0.28 * t)
+            color = tuple(int(MOON_SHADE[i] + (MOON_LIGHT[i] - MOON_SHADE[i]) * t)
+                          for i in range(3))
+            pygame.draw.circle(surf, color, (c - shift, c - shift), radius)
+        # soft craters
+        for dx, dy, r, a in [(0.52, -0.40, 0.15, 55), (-0.56, 0.34, 0.20, 50),
+                             (0.30, 0.60, 0.10, 55)]:
+            crater = pygame.Surface((size, size), pygame.SRCALPHA)
+            pygame.draw.circle(crater, (150, 140, 125, a),
+                               (int(c + dx * R * k), int(c + dy * R * k)), int(r * R * k))
+            surf.blit(crater, (0, 0))
+        return pygame.transform.smoothscale(surf, (2 * R, 2 * R))
+
+    def build_glow(self, R, color):
+        size = 2 * (R + 34)
+        surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        c = size / 2
+        for px in range(size):
+            for py in range(size):
+                d = math.hypot(px - c, py - c)
+                if d >= c:
+                    continue
+                a = max(0.0, 1 - max(0.0, d - R * 0.8) / (c - R * 0.8))
+                surf.set_at((px, py), color + (int(190 * a ** 2.2),))
+        return surf
+
     def draw_clock(self, screen):
         mouse = pygame.mouse.get_pos()
         R = CLOCK_R
         cx = screen.get_width() - MARGIN - R
         cy = screen.get_height() - MARGIN - R
-        # clickable area: the clock plus its ears
-        self.rect = pygame.Rect(cx - R - 4, cy - R - 20, 2 * R + 8, 2 * R + 24)
+        # clickable area: the moon plus its ring
+        self.rect = pygame.Rect(cx - R - 10, cy - R - 10, 2 * R + 20, 2 * R + 20)
         self.buttons["expand"] = self.rect
         hot = self.rect.collidepoint(mouse)
 
         now = time.time()
         flashing = now < self.flash_until
-        pulse = 0.5 + 0.5 * math.sin(now * 5)
         label_text, color = STYLE[self.mode]
         if flashing:
             color = PINK
+        pulse = 0.5 + 0.5 * math.sin(now * (5 if flashing else 1.3))
 
-        # soft glow ring around the clock while a session has just finished
+        # glow behind the moon: soft when idle, breathing when running, pink when done
+        glow = self.glow_pink if flashing else self.glow_cream
         if flashing:
-            glow = pygame.Surface((2 * R + 40, 2 * R + 40), pygame.SRCALPHA)
-            alpha = int(40 + 70 * pulse)
-            pygame.draw.circle(glow, PINK + (alpha,), (R + 20, R + 20), R + 10 + int(6 * pulse), 3)
-            screen.blit(glow, (cx - R - 20, cy - R - 20))
+            strength = 0.55 + 0.45 * pulse
+        elif self.running:
+            strength = 0.55 + 0.25 * pulse
+        else:
+            strength = 0.32
+        if hot:
+            strength = min(1.0, strength + 0.25)
+        glow.set_alpha(int(255 * strength))
+        screen.blit(glow, glow.get_rect(center=(cx, cy)))
 
-        # ears
-        for side in (-1, 1):
-            base_a, base_b, tip_a = (150, 112, 130) if side < 0 else (30, 68, 50)
-            outer = [polar(cx, cy, R - 4, base_a), polar(cx, cy, R - 4, base_b),
-                     polar(cx, cy, R + 18, tip_a)]
-            pygame.draw.polygon(screen, CLOCK_EAR, outer)
-            pygame.draw.polygon(screen, CLOCK_EDGE, outer, 2)
-            ia, ib, it = (144, 120, 132) if side < 0 else (36, 60, 48)
-            inner = [polar(cx, cy, R - 2, ia), polar(cx, cy, R - 2, ib),
-                     polar(cx, cy, R + 9, it)]
-            pygame.draw.polygon(screen, PINK, inner)
+        # the moon
+        screen.blit(self.moon, self.moon.get_rect(center=(cx, cy)))
 
-        # body
-        pygame.draw.circle(screen, CLOCK_BODY, (cx, cy), R)
-        pygame.draw.circle(screen, SAGE if hot else CLOCK_EDGE, (cx, cy), R, 2)
-
-        # progress ring
-        ring_r = R - 7
-        pygame.draw.circle(screen, FAINT, (cx, cy), ring_r, 4)
+        # progress ring around the moon
+        ring_r = R + 7
+        pygame.draw.circle(screen, FAINT, (cx, cy), ring_r, 2)
         total = self.length(self.mode)
         left = self.time_left()
         frac = 1.0 - (left / total if total else 0)
         if frac > 0:
             steps = max(2, int(120 * frac))
             pts = [polar(cx, cy, ring_r, 90 - 360 * frac * k / steps) for k in range(steps + 1)]
-            pygame.draw.lines(screen, color, False, pts, 4)
+            pygame.draw.lines(screen, color, False, pts, 3)
             pygame.draw.circle(screen, color, (int(pts[0][0]), int(pts[0][1])), 2)
             pygame.draw.circle(screen, color, (int(pts[-1][0]), int(pts[-1][1])), 2)
 
-        # time and a tiny status word
+        # time and a tiny status word, written on the moon
         minutes, seconds = divmod(int(math.ceil(left)), 60)
-        t = self.clock_font.render("%02d:%02d" % (minutes, seconds), True, CREAM)
+        t = self.clock_font.render("%02d:%02d" % (minutes, seconds), True, MOON_TEXT)
         screen.blit(t, t.get_rect(center=(cx, cy - 3)))
         if flashing:
-            word = "done!"
+            word, word_color = "done!", (190, 95, 125)
         elif self.running:
-            word = "focus" if self.mode == "focus" else "break"
+            word, word_color = ("focus" if self.mode == "focus" else "break"), (60, 110, 90)
         elif left < total:
-            word = "paused"
+            word, word_color = "paused", (110, 112, 135)
         else:
-            word = "ready"
-        w = self.tiny.render(word, True, color if (self.running or flashing) else DIM)
+            word, word_color = "ready", (110, 112, 135)
+        w = self.tiny.render(word, True, word_color)
         screen.blit(w, w.get_rect(center=(cx, cy + 13)))

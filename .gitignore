@@ -5,4 +5,4 @@ data.json
 # Python and Mac junk
 __pycache__/
 *.pyc
-.DS_Store
+.DS_Storepomodoro_data.json
