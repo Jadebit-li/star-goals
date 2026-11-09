@@ -1,3 +1,4 @@
+import array
 import json
 import math
 import os
@@ -18,6 +19,9 @@ DATA_FILE = os.path.join(HERE, "pomodoro_data.json")   # your settings and your 
 CARD_POS = "top-right"     # where the full card sits: "top-right" or "bottom-right"
 MARGIN = 30                # distance from the screen edges
 CLOCK_R = 40               # size of the minimized moon
+
+SOUND = True               # set to False to turn the end-of-session chime off
+VOLUME = 0.5               # 0.0 (silent) to 1.0 (loud)
 
 MOON_LIGHT = (246, 238, 214)   # moon surface, bright side
 MOON_SHADE = (212, 205, 190)   # moon surface, dark edge
@@ -94,6 +98,44 @@ class Pomodoro:
         self.moon = self.build_moon(CLOCK_R)
         self.glow_cream = self.build_glow(CLOCK_R, (255, 240, 200))
         self.glow_pink = self.build_glow(CLOCK_R, PINK)
+        # the end-of-session chimes are also made once
+        self.sound_focus = self.make_chime([880, 1109, 1319]) if SOUND else None  # 3 rising notes
+        self.sound_break = self.make_chime([1319, 988]) if SOUND else None        # 2 gentle notes
+
+    # ---------- sound ----------
+    def make_chime(self, notes):
+        """A soft bell sound: every note fades out smoothly. Returns None if sound is not available."""
+        try:
+            init = pygame.mixer.get_init()
+            if not init:
+                return None
+            rate, fmt, channels = init
+            if fmt != -16:
+                return None
+            gap = 0.28          # seconds between notes
+            length = 1.1        # how long each note rings
+            total = int(rate * (gap * (len(notes) - 1) + length))
+            samples = [0.0] * total
+            for n, freq in enumerate(notes):
+                start = int(rate * gap * n)
+                for i in range(int(rate * length)):
+                    t = i / rate
+                    env = min(1.0, t / 0.01) * math.exp(-4.0 * t)
+                    v = (math.sin(2 * math.pi * freq * t)
+                         + 0.25 * math.sin(2 * math.pi * freq * 2 * t)) * env
+                    if start + i < total:
+                        samples[start + i] += v
+            peak = max(1e-9, max(abs(s) for s in samples))
+            data = array.array("h")
+            for s in samples:
+                v = int(s / peak * 32767 * 0.8)
+                for _ in range(channels):
+                    data.append(v)
+            sound = pygame.mixer.Sound(buffer=data.tobytes())
+            sound.set_volume(VOLUME)
+            return sound
+        except Exception:
+            return None
 
     # ---------- saving ----------
     def save(self):
@@ -170,6 +212,10 @@ class Pomodoro:
         self.remaining = self.length(self.mode)
 
     def finish(self):
+        # play the chime first, while self.mode is still the session that just ended
+        sound = self.sound_focus if self.mode == "focus" else self.sound_break
+        if sound:
+            sound.play()
         if self.mode == "focus":
             self.done += 1
         self.close_session(True)
