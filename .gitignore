@@ -9,3 +9,5 @@ __pycache__/
 pomodoro_data.json
 
 .DS_Store
+
+journal.json
