@@ -16,7 +16,8 @@ The sky matches the real sky for your location and time. You start with an empty
 - Edit, delete and drag your goals to reorder them, new goals are added at the top, and long lists scroll
 - 8 real constellations unlock as your star count grows
 - New stars pulse with pink rings, and shooting stars start after 500 stars
-- A small Pomodoro timer with a session log, which shrinks into a glowing moon
+- A journal that records everything you tick, day by day
+- A Pomodoro timer with a session log and a soft chime, which shrinks into a glowing moon
 - Everything is saved in local files, no internet needed
 
 ## Setup
@@ -39,7 +40,7 @@ You need Python 3.
 
 - **G**: open or close the goals panel
 - **Click a goal**: tick it and earn stars
-- **Daily goals**: the Add button turns into a stepper like - 3 +. Press + to tick again today, and - to take one back
+- **Daily goals**: after the first tick, a stepper like - 3 + shows how many times you ticked it today. Press + to tick again, and - to take one back
 - **One-time goals**: click once to finish, click again to undo
 - **Right-click a goal**: undo one tick
 - **Hold and drag the dots on the left**: move a goal up or down
@@ -47,25 +48,40 @@ You need Python 3.
 - **x on a goal**: click twice to delete it (you lose the stars it gave)
 - **+ Add goal**: make your own goal (Tab moves between boxes, Enter saves, Esc cancels)
 - **Mouse wheel or two-finger scroll**: scroll a long list
+- **J**: open or close the journal
+- **T**: open or minimize the Pomodoro timer
 - **F**: switch between fullscreen and window
 - **C**: show or hide constellation lines
 - **Esc**: quit
 
+## Journal
+
+Every time you tick a goal, it is written to the journal with the time, the name and the stars. Press **J** to read it. Days are listed from newest to oldest, each with its total, and you can scroll back through them. If you undo a tick, that line is removed. If you delete or rename a goal, the old lines stay, so the journal remains a true record of what you did.
+
 ## Pomodoro timer
 
-A small timer card sits in the top right corner.
+A small timer card sits in the top right corner. Press **T** to minimize it.
 
 - Play or pause, skip to the next part, or reset
 - **set**: change the focus, short break and long break lengths (shift+click changes by 5)
 - **log**: see today's and this week's focus time, and every session you finished or stopped
-- The small minimize button turns the card into a glowing moon in the bottom right corner. Click the moon to open the card again, or right-click it to start and pause
+- A soft chime plays when a session ends: three rising notes after focus, two gentle notes after a break
+- Minimized, the timer becomes a glowing moon in the bottom right corner. Click the moon to open the card again, or right-click it to start and pause
+
+## How the sky works
+
+- Each star in the HYG catalog has a position in the sky (right ascension and declination) and a brightness
+- Your computer's clock and your longitude give the local sidereal time, which says which part of the sky is overhead right now
+- With your latitude, every star is turned into a height and direction above the horizon, then drawn on the screen
+- The number of stars you see is your star total, taken from the brightest down
+- The Milky Way is drawn along the plane of our galaxy, using galactic coordinates
 
 ## Make it yours
 
 - Constellation costs are in `COSTS` at the top of `sky.py`
 - Shooting star settings are at the top of `shooting.py`
-- Timer settings and the card position are at the top of `pomodoro.py`
-- Your goals and star count are saved in `data.json`, and your timer log in `pomodoro_data.json`. Both are created on first run and are not uploaded to GitHub
+- Timer settings, the chime volume (`SOUND` and `VOLUME`) and the card position are at the top of `pomodoro.py`
+- Your goals and star count are saved in `data.json`, your timer log in `pomodoro_data.json`, and your journal in `journal.json`. They are created on first run and are not uploaded to GitHub
 
 ## Credits
 
