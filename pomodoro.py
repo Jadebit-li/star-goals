@@ -2,7 +2,11 @@ import array
 import json
 import math
 import os
+import subprocess
+import sys
+import tempfile
 import time
+import wave
 import pygame
 
 CREAM = (255, 244, 225)
@@ -94,24 +98,20 @@ class Pomodoro:
         self.log_scroll = 0
         self.rect = None
         self.buttons = {}
+        self._playing = None
         # the moon and its glow are drawn once and reused
         self.moon = self.build_moon(CLOCK_R)
         self.glow_cream = self.build_glow(CLOCK_R, (255, 240, 200))
         self.glow_pink = self.build_glow(CLOCK_R, PINK)
-        # the end-of-session chimes are also made once
+        # the end-of-session chimes are made once, as small sound files
         self.sound_focus = self.make_chime([880, 1109, 1319]) if SOUND else None  # 3 rising notes
         self.sound_break = self.make_chime([1319, 988]) if SOUND else None        # 2 gentle notes
 
     # ---------- sound ----------
     def make_chime(self, notes):
-        """A soft bell sound: every note fades out smoothly. Returns None if sound is not available."""
+        """Make a soft bell and save it as a small WAV file. Returns the file path (or None)."""
         try:
-            init = pygame.mixer.get_init()
-            if not init:
-                return None
-            rate, fmt, channels = init
-            if fmt != -16:
-                return None
+            rate = 44100
             gap = 0.28          # seconds between notes
             length = 1.1        # how long each note rings
             total = int(rate * (gap * (len(notes) - 1) + length))
@@ -126,16 +126,40 @@ class Pomodoro:
                     if start + i < total:
                         samples[start + i] += v
             peak = max(1e-9, max(abs(s) for s in samples))
-            data = array.array("h")
-            for s in samples:
-                v = int(s / peak * 32767 * 0.8)
-                for _ in range(channels):
-                    data.append(v)
-            sound = pygame.mixer.Sound(buffer=data.tobytes())
-            sound.set_volume(VOLUME)
-            return sound
+            data = array.array("h", [int(s / peak * 32767 * 0.8) for s in samples])
+            if sys.byteorder == "big":
+                data.byteswap()
+            path = os.path.join(tempfile.gettempdir(),
+                                "star_goals_chime_" + "_".join(str(n) for n in notes) + ".wav")
+            with wave.open(path, "wb") as f:
+                f.setnchannels(1)
+                f.setsampwidth(2)
+                f.setframerate(rate)
+                f.writeframes(data.tobytes())
+            return path
         except Exception:
             return None
+
+    def play_chime(self, path):
+        if not path:
+            return
+        if sys.platform == "darwin":
+            # afplay uses whatever output your Mac is using right now (speakers or headphones)
+            try:
+                subprocess.Popen(["afplay", "-v", str(VOLUME), path],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+            except OSError:
+                pass
+        # other systems: open the sound device fresh each time, so it follows your output
+        try:
+            pygame.mixer.quit()
+            pygame.mixer.init()
+            self._playing = pygame.mixer.Sound(path)
+            self._playing.set_volume(VOLUME)
+            self._playing.play()
+        except Exception:
+            pass
 
     # ---------- saving ----------
     def save(self):
@@ -213,9 +237,7 @@ class Pomodoro:
 
     def finish(self):
         # play the chime first, while self.mode is still the session that just ended
-        sound = self.sound_focus if self.mode == "focus" else self.sound_break
-        if sound:
-            sound.play()
+        self.play_chime(self.sound_focus if self.mode == "focus" else self.sound_break)
         if self.mode == "focus":
             self.done += 1
         self.close_session(True)
