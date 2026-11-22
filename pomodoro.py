@@ -129,8 +129,8 @@ class Pomodoro:
             data = array.array("h", [int(s / peak * 32767 * 0.8) for s in samples])
             if sys.byteorder == "big":
                 data.byteswap()
-            path = os.path.join(tempfile.gettempdir(),
-                                "star_goals_chime_" + "_".join(str(n) for n in notes) + ".wav")
+            path = os.path.join(HERE,
+                    "star_goals_chime_" + "_".join(str(n) for n in notes) + ".wav")
             with wave.open(path, "wb") as f:
                 f.setnchannels(1)
                 f.setsampwidth(2)
@@ -138,6 +138,8 @@ class Pomodoro:
                 f.writeframes(data.tobytes())
             return path
         except Exception:
+            import traceback
+            traceback.print_exc()
             return None
 
     def play_chime(self, path):
